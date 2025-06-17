@@ -1,71 +1,99 @@
-import { AppState } from 'react-native';
-import Storage from './storage';
+// ../services/appMonitor.js
+import { NativeModules, DeviceEventEmitter } from 'react-native';
+import { checkAppBlocking } from './appBlocker';
 
-let currentApp = null;
-let accessRules = {};
+const { AppUtilsModule } = NativeModules;
 
-// Initialize with access rules
-export const initAppMonitor = rules => {
-  accessRules = rules;
+// Add these new exports
+export const initAppMonitor = (accessRules) => {
+  AppUtilsModule.updateAccessRules(accessRules);
   startAppMonitoring();
 };
 
-// Update rules when they change
-export const updateAccessRules = newRules => {
-  accessRules = newRules;
+export const updateAccessRules = (accessRules) => {
+  AppUtilsModule.updateAccessRules(accessRules);
 };
 
+// Existing functions
 export const startAppMonitoring = () => {
-  console.log('App monitoring started');
-  // Platform-specific monitoring would be implemented here
+  AppUtilsModule.startAppMonitoring();
+  DeviceEventEmitter.addListener('APP_IN_FOREGROUND', appId => {
+    checkAppBlocking(appId);
+  });
 };
 
-export const trackAppLaunch = appId => {
-  currentApp = appId;
-  checkAppAccessRules(appId);
+export const stopAppMonitoring = () => {
+  AppUtilsModule.stopAppMonitoring();
 };
 
-const checkAppAccessRules = async appId => {
-  const rules = accessRules[appId];
+// import { AppState } from 'react-native';
+// import Storage from './storage';
 
-  if (!rules) return;
+// let currentApp = null;
+// let accessRules = {};
 
-  const now = Date.now();
-  const lastAccessKey = `lastAccess:${appId}`;
-  const lockedUntilKey = `lockedUntil:${appId}`;
+// // Initialize with access rules
+// export const initAppMonitor = rules => {
+//   accessRules = rules;
+//   startAppMonitoring();
+// };
 
-  const lastAccess = (await Storage.getIntAsync(lastAccessKey)) || 0;
-  const lockedUntil = (await Storage.getIntAsync(lockedUntilKey)) || 0;
+// // Update rules when they change
+// export const updateAccessRules = newRules => {
+//   accessRules = newRules;
+// };
 
-  // If app is currently locked
-  if (now < lockedUntil) {
-    triggerLockScreen(appId);
-    return;
-  }
+// export const startAppMonitoring = () => {
+//   console.log('App monitoring started');
+//   // Platform-specific monitoring would be implemented here
+// };
 
-  // If access time has expired
-  if (now > lastAccess + rules.accessTime * 60000) {
-    // Lock the app
-    const newLockedUntil = now + rules.lockTime * 60000;
-    await Storage.setIntAsync(lockedUntilKey, newLockedUntil);
-    triggerLockScreen(appId);
-    return;
-  }
+// export const trackAppLaunch = appId => {
+//   currentApp = appId;
+//   checkAppAccessRules(appId);
+// };
 
-  // Start tracking usage
-  await Storage.setIntAsync(lastAccessKey, now);
-};
+// const checkAppAccessRules = async appId => {
+//   const rules = accessRules[appId];
 
-// Trigger lock screen via event emitter
-import { DeviceEventEmitter } from 'react-native';
+//   if (!rules) return;
 
-export const triggerLockScreen = appId => {
-  DeviceEventEmitter.emit('showLockScreen', { appId });
-};
+//   const now = Date.now();
+//   const lastAccessKey = `lastAccess:${appId}`;
+//   const lockedUntilKey = `lockedUntil:${appId}`;
 
-// Track app state changes
-AppState.addEventListener('change', nextAppState => {
-  if (nextAppState === 'active' && currentApp) {
-    checkAppAccessRules(currentApp);
-  }
-});
+//   const lastAccess = (await Storage.getIntAsync(lastAccessKey)) || 0;
+//   const lockedUntil = (await Storage.getIntAsync(lockedUntilKey)) || 0;
+
+//   // If app is currently locked
+//   if (now < lockedUntil) {
+//     triggerLockScreen(appId);
+//     return;
+//   }
+
+//   // If access time has expired
+//   if (now > lastAccess + rules.accessTime * 60000) {
+//     // Lock the app
+//     const newLockedUntil = now + rules.lockTime * 60000;
+//     await Storage.setIntAsync(lockedUntilKey, newLockedUntil);
+//     triggerLockScreen(appId);
+//     return;
+//   }
+
+//   // Start tracking usage
+//   await Storage.setIntAsync(lastAccessKey, now);
+// };
+
+// // Trigger lock screen via event emitter
+// import { DeviceEventEmitter } from 'react-native';
+
+// export const triggerLockScreen = appId => {
+//   DeviceEventEmitter.emit('showLockScreen', { appId });
+// };
+
+// // Track app state changes
+// AppState.addEventListener('change', nextAppState => {
+//   if (nextAppState === 'active' && currentApp) {
+//     checkAppAccessRules(currentApp);
+//   }
+// });

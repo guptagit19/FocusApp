@@ -15,6 +15,9 @@ import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.WritableNativeArray
 import com.facebook.react.bridge.WritableNativeMap
 import java.io.ByteArrayOutputStream
+import android.content.Intent
+import android.os.Build
+
 
 class AppUtilsModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -55,6 +58,25 @@ class AppUtilsModule(reactContext: ReactApplicationContext) :
             promise.reject("ERROR_GETTING_APPS", e)
         }
     }
+
+// Add these methods to existing module
+    @ReactMethod
+    fun startAppMonitoring() {
+        val intent = Intent(reactApplicationContext, AppMonitorService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            reactApplicationContext.startForegroundService(intent)
+        } else {
+            reactApplicationContext.startService(intent)
+        }
+    }
+
+    @ReactMethod
+    fun stopAppMonitoring() {
+        val intent = Intent(reactApplicationContext, AppMonitorService::class.java)
+        reactApplicationContext.stopService(intent)
+    }
+
+
 
 private fun drawableToBase64(drawable: Drawable): String {
     val bitmap = if (drawable.intrinsicWidth <= 0 || drawable.intrinsicHeight <= 0) {
