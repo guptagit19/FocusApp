@@ -1,0 +1,843 @@
+Check the below code and also add the debugger at every possible so we can analysis.
+
+// File: src/screens/FocusScreen.js
+import React, { useState, useEffect } from 'react';
+import { View, FlatList, StyleSheet, Text } from 'react-native';
+import { getInstalledApps } from '../utils/appUtils';
+import { getBlockedApps, saveBlockedApps } from '../services/storage';
+import FocusHeader from '../components/FocusHeader';
+import SectionHeader from '../components/SectionHeader';
+import AppRow from '../components/AppRow';
+
+const FocusScreen = () => {
+  const [apps, setApps] = useState([]);
+  const [blockedApps, setBlockedApps] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      const installedApps = await getInstalledApps();
+      const userBlockedApps = getBlockedApps();
+
+      setApps(installedApps);
+      setBlockedApps(userBlockedApps);
+      setLoading(false);
+    };
+
+    loadData();
+  }, []);
+
+  const toggleAppBlock = app => {
+    const isBlocked = blockedApps.some(a => a.id === app.id);
+    let newBlockedApps;
+
+    if (isBlocked) {
+      newBlockedApps = blockedApps.filter(a => a.id !== app.id);
+    } else {
+      newBlockedApps = [...blockedApps, app];
+    }
+
+    setBlockedApps(newBlockedApps);
+    saveBlockedApps(newBlockedApps);
+  };
+
+  const availableApps = apps.filter(
+    app => !blockedApps.some(blocked => blocked.id === app.id),
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>Loading apps...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <FocusHeader />
+
+      <SectionHeader title="Your distracting apps" />
+      <FlatList
+        data={blockedApps}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => (
+          <AppRow
+            app={item}
+            isBlocked={true}
+            onToggle={() => toggleAppBlock(item)}
+          />
+        )}
+      />
+
+      <SectionHeader title="Select more apps" />
+      <FlatList
+        data={availableApps}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => (
+          <AppRow
+            app={item}
+            isBlocked={false}
+            onToggle={() => toggleAppBlock(item)}
+          />
+        )}
+      />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
+export default FocusScreen;
+
+
+// File: src/services/storage.js
+
+import { MMKV } from 'react-native-mmkv';
+const storage = new MMKV();
+
+// Blocked apps storage
+export const getBlockedApps = () => {
+  const apps = storage.getString('blockedApps');
+  return apps ? JSON.parse(apps) : [];
+};
+
+export const saveBlockedApps = apps => {
+  storage.set('blockedApps', JSON.stringify(apps));
+};
+
+// Access rules storage
+export const getAccessRules = appId => {
+  const rules = storage.getString(`rules_${appId}`);
+  return rules ? JSON.parse(rules) : null;
+};
+
+export const saveAccessRules = (appId, rules) => {
+  storage.set(`rules_${appId}`, JSON.stringify(rules));
+};
+
+
+// File: src/services/appBlocker.js
+import Storage from './storage';
+import { showLockScreen, showAccessSetup } from './uiManager';
+import { startTimeTracking } from './timeTracker';
+
+export const checkAppBlocking = async appId => {
+  console.log(`[DEBUG] Checking blocking for app: ${appId}`);
+
+  try {
+    const blockingRules =
+      (await Storage.getMapAsync(`blocking:${appId}`)) || {};
+    console.log(
+      `[DEBUG] Blocking rules for ${appId}:`,
+      JSON.stringify(blockingRules),
+    );
+
+    // Check if app is in blocked list
+    const blockedApps = await Storage.getArrayAsync('blockedApps');
+    const isBlocked = blockedApps && blockedApps.some(app => app.id === appId);
+    console.log(`[DEBUG] Is ${appId} blocked? ${isBlocked}`);
+
+    if (!isBlocked) {
+      console.log(`[DEBUG] ${appId} is not in blocked list, ignoring`);
+      return;
+    }
+
+    const currentTime = Date.now();
+    const { accessEnd, lockEnd } = blockingRules;
+
+    // App is currently locked
+    if (lockEnd && currentTime < lockEnd) {
+      console.log(
+        `[DEBUG] ${appId} is locked until ${new Date(
+          lockEnd,
+        ).toLocaleTimeString()}`,
+      );
+      showLockScreen(appId);
+      return;
+    }
+
+    // Access time not set
+    if (!accessEnd) {
+      console.log(`[DEBUG] No access rules set for ${appId}, showing setup`);
+      showAccessSetup(appId);
+      return;
+    }
+
+    // Access time expired
+    if (currentTime > accessEnd) {
+      console.log(`[DEBUG] Access time expired for ${appId}, locking app`);
+      const lockTime = blockingRules.lockTime || 30; // minutes
+      const lockEnd = currentTime + lockTime * 60000;
+
+      await Storage.setMapAsync(`blocking:${appId}`, {
+        ...blockingRules,
+        lockEnd,
+      });
+
+      showLockScreen(appId);
+      return;
+    }
+
+    console.log(`[DEBUG] ${appId} can be accessed, starting time tracking`);
+    startTimeTracking(appId, accessEnd);
+  } catch (error) {
+    console.error(`[ERROR] Error checking app blocking for ${appId}:`, error);
+  }
+};
+
+// File: src/services/appMonitor.js
+	import { NativeModules, DeviceEventEmitter } from 'react-native';
+	import { checkAppBlocking } from './appBlocker';
+
+	const { AppUtilsModule } = NativeModules;
+
+	// Add these new exports
+	export const initAppMonitor = (accessRules) => {
+	  AppUtilsModule.updateAccessRules(accessRules);
+	  startAppMonitoring();
+	};
+
+	export const updateAccessRules = (accessRules) => {
+	  AppUtilsModule.updateAccessRules(accessRules);
+	};
+
+// Existing functions
+	export const startAppMonitoring = () => {
+	  AppUtilsModule.startAppMonitoring();
+	  DeviceEventEmitter.addListener('APP_IN_FOREGROUND', appId => {
+		checkAppBlocking(appId);
+	  });
+	};
+
+	export const stopAppMonitoring = () => {
+	  AppUtilsModule.stopAppMonitoring();
+	};
+
+	import { AppState } from 'react-native';
+	import Storage from './storage';
+	
+	let currentApp = null;
+	let accessRules = {};
+	
+	// Initialize with access rules
+	export const initAppMonitor = rules => {
+	accessRules = rules;
+	startAppMonitoring();
+	};
+	
+	// Update rules when they change
+	export const updateAccessRules = newRules => {
+	accessRules = newRules;
+	};
+	
+	export const startAppMonitoring = () => {
+	console.log('App monitoring started');
+	// Platform-specific monitoring would be implemented here
+	};
+	
+	export const trackAppLaunch = appId => {
+	currentApp = appId;
+	checkAppAccessRules(appId);
+	};
+	
+	const checkAppAccessRules = async appId => {
+	const rules = accessRules[appId];
+	
+	if (!rules) return;
+	
+	const now = Date.now();
+	const lastAccessKey = `lastAccess:${appId}`;
+	const lockedUntilKey = `lockedUntil:${appId}`;
+	
+	const lastAccess = (await Storage.getIntAsync(lastAccessKey)) || 0;
+	const lockedUntil = (await Storage.getIntAsync(lockedUntilKey)) || 0;
+	
+	// If app is currently locked
+	if (now < lockedUntil) {
+		triggerLockScreen(appId);
+		return;
+	}
+	
+	// If access time has expired
+	if (now > lastAccess + rules.accessTime * 60000) {
+		// Lock the app
+		const newLockedUntil = now + rules.lockTime * 60000;
+		await Storage.setIntAsync(lockedUntilKey, newLockedUntil);
+		triggerLockScreen(appId);
+		return;
+	}
+	
+	// Start tracking usage
+	await Storage.setIntAsync(lastAccessKey, now);
+	};
+	
+	// Trigger lock screen via event emitter
+	import { DeviceEventEmitter } from 'react-native';
+	
+	export const triggerLockScreen = appId => {
+	DeviceEventEmitter.emit('showLockScreen', { appId });
+	};
+	
+	// Track app state changes
+	AppState.addEventListener('change', nextAppState => {
+	if (nextAppState === 'active' && currentApp) {
+		checkAppAccessRules(currentApp);
+	}
+	});
+	
+// File: src/services/timeTracker.js
+import { AppState } from 'react-native';
+import Storage from './storage';
+import { showLockScreen } from './uiManager';
+
+let currentApp = null;
+let accessEnd = 0;
+
+export const startTimeTracking = (appId, endTime) => {
+  currentApp = appId;
+  accessEnd = endTime;
+
+  // Check time when app comes to foreground
+  AppState.addEventListener('change', handleAppStateChange);
+};
+
+const handleAppStateChange = async nextAppState => {
+  if (nextAppState === 'active' && currentApp) {
+    const currentTime = Date.now();
+
+    if (currentTime > accessEnd) {
+      // Access time expired - lock app
+      const blockingRules =
+        (await Storage.getMapAsync(`blocking:${currentApp}`)) || {};
+      const lockTime = blockingRules.lockTime || 30; // minutes
+      const lockEnd = currentTime + lockTime * 60000;
+
+      await Storage.setMapAsync(`blocking:${currentApp}`, {
+        ...blockingRules,
+        lockEnd,
+      });
+
+      showLockScreen(currentApp);
+      stopTimeTracking();
+    }
+  }
+};
+
+export const stopTimeTracking = () => {
+  currentApp = null;
+  accessEnd = 0;
+  AppState.removeEventListener('change', handleAppStateChange);
+};
+
+// File: src/components/app/LockOverlay.js
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Image, Button } from 'react-native';
+import { useAppContext } from '../../context/AppContext';
+
+const LockOverlay = ({ appId }) => {
+  const { distractingApps, appSettings } = useAppContext();
+  const [app, setApp] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(0);
+
+  useEffect(() => {
+    // Find app by ID
+    const foundApp = distractingApps.find(a => a.id === appId);
+    if (foundApp) setApp(foundApp);
+
+    // Calculate time left
+    const interval = setInterval(() => {
+      // This would come from service
+      setTimeLeft(prev => Math.max(0, prev - 1000));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [appId, distractingApps]);
+
+  if (!app) return null;
+
+  return (
+    <View style={styles.overlay}>
+      <View style={styles.container}>
+        <Image source={{ uri: app.icon }} style={styles.icon} />
+        <Text style={styles.title}>{app.name} is Locked</Text>
+        <Text style={styles.timer}>{formatTime(timeLeft)}</Text>
+        <Text style={styles.message}>
+          {appSettings.motivationalMessage ||
+            'Stay focused! You can access this app after the timer expires.'}
+        </Text>
+        <Button title="Close" onPress={() => {}} />
+      </View>
+    </View>
+  );
+};
+
+const formatTime = ms => {
+  // Format ms to mm:ss
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds
+    .toString()
+    .padStart(2, '0')}`;
+};
+
+const styles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  container: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 20,
+    width: '80%',
+    alignItems: 'center',
+  },
+  icon: {
+    width: 64,
+    height: 64,
+    marginBottom: 15,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  timer: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#e74c3c',
+  },
+  message: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+});
+
+export default LockOverlay;
+
+// File: App.js
+import React, { useState, useEffect } from 'react';
+import { DeviceEventEmitter, View } from 'react-native';
+import { getBlockedApps } from './src/services/storage';
+import FocusScreen from './src/screens/FocusScreen';
+import LockScreen from './src/components/LockScreen';
+import AccessSetupModal from './src/components/AccessSetupModal';
+import { shouldBlockApp, setupAccessRules } from './src/services/appBlocker';
+
+const App = () => {
+  const [currentApp, setCurrentApp] = useState(null);
+  const [showLockScreen, setShowLockScreen] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [lockTime, setLockTime] = useState(0);
+
+  // Handle app foreground events
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      'APP_IN_FOREGROUND',
+      appId => {
+        const blockedApps = getBlockedApps();
+        const app = blockedApps.find(a => a.id === appId);
+
+        if (app) {
+          const blockInfo = shouldBlockApp(appId);
+
+          if (blockInfo.shouldBlock) {
+            setCurrentApp(app);
+
+            if (blockInfo.needsSetup) {
+              setShowSetupModal(true);
+            } else {
+              setLockTime(blockInfo.lockTime);
+              setShowLockScreen(true);
+            }
+          }
+        }
+      },
+    );
+
+    return () => subscription.remove();
+  }, []);
+
+  const handleSaveRules = (appId, accessTime, lockTime) => {
+    setupAccessRules(appId, accessTime, lockTime);
+  };
+
+  return (
+    <View style={{ flex: 1 }}>
+      <FocusScreen />
+
+      {showLockScreen && (
+        <LockScreen
+          app={currentApp}
+          lockTime={lockTime}
+          onClose={() => setShowLockScreen(false)}
+        />
+      )}
+
+      {showSetupModal && (
+        <AccessSetupModal
+          app={currentApp}
+          onSave={handleSaveRules}
+          onClose={() => setShowSetupModal(false)}
+        />
+      )}
+    </View>
+  );
+};
+
+export default App;
+
+// File: android/app/src/main/java/com/focusapp/AppUtilsModule.kt
+package com.focusapp
+
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+import android.util.Base64
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.WritableArray
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.bridge.WritableNativeArray
+import com.facebook.react.bridge.WritableNativeMap
+import java.io.ByteArrayOutputStream
+import android.content.Intent
+import android.os.Build
+
+
+class AppUtilsModule(reactContext: ReactApplicationContext) :
+    ReactContextBaseJavaModule(reactContext) {
+
+    override fun getName(): String {
+        return "AppUtilsModule"
+    }
+
+    @ReactMethod
+    fun getInstalledApps(promise: Promise) {
+        try {
+            val pm = reactApplicationContext.packageManager
+            val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            val appList = WritableNativeArray()
+
+            for (packageInfo in packages) {
+                // Skip system apps
+                if (packageInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0) {
+                    continue
+                }
+
+                val appName = packageInfo.loadLabel(pm).toString()
+                val packageName = packageInfo.packageName
+                val icon = packageInfo.loadIcon(pm)
+                
+                val iconBase64 = drawableToBase64(icon)
+
+                val appInfo = WritableNativeMap()
+                appInfo.putString("appName", appName)
+                appInfo.putString("packageName", packageName)
+                appInfo.putString("icon", iconBase64)
+
+                appList.pushMap(appInfo)
+            }
+
+            promise.resolve(appList)
+        } catch (e: Exception) {
+            promise.reject("ERROR_GETTING_APPS", e)
+        }
+    }
+
+// Add these methods to existing module
+    @ReactMethod
+    fun startAppMonitoring() {
+        val intent = Intent(reactApplicationContext, AppMonitorService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            reactApplicationContext.startForegroundService(intent)
+        } else {
+            reactApplicationContext.startService(intent)
+        }
+    }
+
+    @ReactMethod
+    fun stopAppMonitoring() {
+        val intent = Intent(reactApplicationContext, AppMonitorService::class.java)
+        reactApplicationContext.stopService(intent)
+    }
+
+
+
+private fun drawableToBase64(drawable: Drawable): String {
+    val bitmap = if (drawable.intrinsicWidth <= 0 || drawable.intrinsicHeight <= 0) {
+        Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888) // Single color bitmap
+    } else {
+        Bitmap.createBitmap(
+            drawable.intrinsicWidth,
+            drawable.intrinsicHeight,
+            Bitmap.Config.ARGB_8888
+        )
+    }
+    
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, canvas.width, canvas.height)
+    drawable.draw(canvas)
+    
+    val stream = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+    val byteArray = stream.toByteArray()
+    
+    return Base64.encodeToString(byteArray, Base64.DEFAULT)
+}
+}
+
+// File: android/app/src/main/java/com/focusapp/AppMonitorService.kt
+package com.focusapp
+
+import android.util.Log
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import android.util.Log
+import com.facebook.react.ReactApplication
+import com.facebook.react.ReactInstanceManager
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
+
+class AppMonitorService : Service() {
+    private lateinit var usageStatsManager: UsageStatsManager
+    private var monitoringThread: Thread? = null
+    private var shouldMonitor = true
+
+    override fun onCreate() {
+        super.onCreate()
+        usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        startForegroundService()
+    }
+
+    private fun startForegroundService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Create a notification and start as foreground service
+            val notification = createNotification()
+            startForeground(1, notification)
+        }
+        startMonitoring()
+    }
+
+    private fun createNotification(): android.app.Notification {
+        // Create a notification for Android O and above
+        val channelId = "app_monitor_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                channelId,
+                "App Monitor",
+                android.app.NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(android.app.NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+
+        return android.app.Notification.Builder(this, channelId)
+            .setContentTitle("FocusApp Running")
+            .setContentText("Monitoring app usage")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .build()
+    }
+
+    private fun startMonitoring() {
+        shouldMonitor = true
+        monitoringThread = Thread {
+            while (shouldMonitor) {
+                try {
+                    val foregroundApp = getForegroundApp()
+                    foregroundApp?.let { sendAppEvent(it) }
+                    Thread.sleep(1000)
+                } catch (e: InterruptedException) {
+                    Log.e("AppMonitor", "Monitoring interrupted", e)
+                }
+            }
+        }
+        monitoringThread?.start()
+    }
+
+    private fun getForegroundApp(): String? {
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - 1000 * 60 // 1 minute
+        val events = usageStatsManager.queryEvents(startTime, endTime)
+        val event = UsageEvents.Event()
+        var foregroundApp: String? = null
+        
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                foregroundApp = event.packageName
+            }
+        }
+        
+        Log.d("AppMonitor", "Foreground app detected: ${foregroundApp ?: "none"}");
+        return foregroundApp
+    }
+
+    private fun sendAppEvent(packageName: String) {
+        Log.d("AppMonitor", "Sending app event to JS: $packageName");
+        try {
+            val reactInstanceManager: ReactInstanceManager? = 
+                (application as ReactApplication).reactNativeHost.reactInstanceManager
+            val reactContext: ReactContext? = reactInstanceManager?.currentReactContext
+            
+            reactContext?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit("APP_IN_FOREGROUND", packageName)
+        } catch (e: Exception) {
+            Log.e("AppMonitor", "Error sending app event", e)
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        shouldMonitor = false
+        monitoringThread?.interrupt()
+        super.onDestroy()
+    }
+}
+
+// File: android/app/src/main/java/com/focusapp/MainActivity.kt
+package com.focusapp
+
+import android.app.AppOpsManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import com.facebook.react.ReactActivity
+import com.facebook.react.ReactActivityDelegate
+import com.facebook.react.ReactRootView
+import com.swmansion.gesturehandler.react.RNGestureHandlerEnabledRootView
+
+class MainActivity : ReactActivity() {
+    private val USAGE_STATS_PERMISSION_REQUEST = 123
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        createNotificationChannel()
+        checkUsageStatsPermission()
+    }
+    
+    override fun getMainComponentName(): String {
+        return "FocusApp"
+    }
+
+    override fun createReactActivityDelegate(): ReactActivityDelegate {
+        return object : ReactActivityDelegate(this, mainComponentName) {
+            override fun createRootView(): ReactRootView {
+                return RNGestureHandlerEnabledRootView(this@MainActivity)
+            }
+        }
+    }
+    
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "app_monitor_channel",
+                "App Monitor",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
+    }
+    
+    private fun checkUsageStatsPermission() {
+        if (!hasUsageStatsPermission()) {
+            requestUsageStatsPermission()
+        }
+    }
+    
+    private fun hasUsageStatsPermission(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            packageName
+        )
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+    
+    private fun requestUsageStatsPermission() {
+        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+        startActivityForResult(intent, USAGE_STATS_PERMISSION_REQUEST)
+    }
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == USAGE_STATS_PERMISSION_REQUEST) {
+            if (!hasUsageStatsPermission()) {
+                // Permission still not granted, show a message
+            }
+        }
+    }
+}
+
+// File: android/app/src/main/AndroidManifest.xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <queries>
+      <intent>
+        <action android:name="android.intent.action.MAIN" />
+      </intent>
+    </queries>
+
+    <application
+      android:name=".MainApplication"
+      android:label="@string/app_name"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher_round"
+      android:allowBackup="false"
+      android:theme="@style/AppTheme"
+      android:supportsRtl="true">
+      <activity
+        android:name=".MainActivity"
+        android:label="@string/app_name"
+        android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+        android:launchMode="singleTask"
+        android:windowSoftInputMode="adjustResize"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+      </activity>
+    </application>
+</manifest>
