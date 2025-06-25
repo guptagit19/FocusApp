@@ -1,0 +1,61 @@
+// src/services/appBlocker.js
+import { getDistractingApps, getAccessRules } from './storage';
+import { showLockScreen, showAccessSetup } from './uiManager';
+import { saveAccessRules } from './storage';
+
+// Check if an app should be blocked
+export const checkAppBlocking = packageName => {
+  // Get current state
+  const distractingApps = getDistractingApps();
+  const accessRules = getAccessRules();
+
+  console.log('[DEBUG][appBlocker] distractingApps', distractingApps);
+  console.log('[DEBUG][appBlocker] accessRules - ', accessRules);
+  // Skip if not a distracting app
+  if (!distractingApps.some(app => app.packageName === packageName)) {
+    console.log('[DEBUG][appBlocker] inside', packageName);
+    return;
+  }
+
+  console.log('[DEBUG][appBlocker] packageName - ', packageName);
+  const now = Date.now();
+  const rule = accessRules[packageName];
+
+  console.log('[DEBUG][appBlocker] outside now - ', now);
+  console.log('[DEBUG][appBlocker] outside rule - ', rule);
+  // Case 1: No existing rule
+  if (!rule) {
+    console.log('[DEBUG][appBlocker] inside rule - ', rule);
+    console.log('[DEBUG][appBlocker] inside rule packageName - ', packageName);
+    showAccessSetup(packageName);
+    return;
+  }
+
+  // Case 2: Within access window
+  if (now < rule.accessEnd) {
+    // Track usage time if needed
+    return;
+  }
+
+  // Case 3: Access expired - show lock screen
+  showLockScreen(packageName);
+
+  // Case 4: Lock period ended - reset rules
+  if (rule.lockEnd && now > rule.lockEnd) {
+    const newRules = { ...accessRules };
+    delete newRules[packageName];
+    saveAccessRules(newRules);
+  }
+};
+
+// Create a new access rule
+export const createAccessRule = (packageName, durationMinutes) => {
+  const now = Date.now();
+  const accessEnd = now + durationMinutes * 60 * 1000;
+
+  return {
+    accessEnd,
+    lockDuration: durationMinutes * 60 * 1000,
+    lockEnd: accessEnd + durationMinutes * 60 * 1000,
+  };
+};
