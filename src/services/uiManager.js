@@ -1,43 +1,55 @@
 // src/services/uiManager.js
 import { DeviceEventEmitter } from 'react-native';
 import { useAppContext } from '../context/AppContext';
+import { getDistractingApps, readFromStorage } from './storage';
 
 // Hold context reference
 let appContext = null;
 
-// Set context reference
-export const setAppContext = context => {
-  appContext = context;
+// Unified app finder using storage
+const findAppEverywhere = (packageName) => {
+  // 1. Check storage first
+  const storageApps = [
+    ...(getDistractingApps() || []),
+    ...(readFromStorage('installedApps') || [])
+  ];
+  const appFromStorage = storageApps.find(a => a.packageName === packageName);
+  console.log('[DEBUG][uiManager] findAppEverywhere: before ', appFromStorage);
+  if (appFromStorage) return appFromStorage;
+  
+  console.log('[DEBUG][uiManager] findAppEverywhere: after ', appFromStorage);
+  // 2. Fallback to context
+  return [
+    ...(appContext?.distractingApps || []),
+    ...(appContext?.installedApps || [])
+  ].find(a => a.packageName === packageName);
 };
 
-// Show lock screen for a package
+// Updated showAccessSetup
+export const showAccessSetup = packageName => {
+  const app = findAppEverywhere(packageName);
+  console.log('[DEBUG][uiManager] showAccessSetup:', app);
+  if (app && appContext) {
+    console.log('[DEBUG][uiManager] Showing access for:', app.name);
+    appContext.showAccessSetup(app);
+  } else {
+    console.log('[ERROR][uiManager] App not found:', packageName);
+  }
+};
+
+// Updated showLockScreen
 export const showLockScreen = packageName => {
-  if (!appContext) return;
-
-  // Find app by packageName
-  const app = [...appContext.distractingApps, ...appContext.installedApps].find(
-    a => a.packageName === packageName,
-  );
-
-  if (app) {
+  const app = findAppEverywhere(packageName);
+  
+  if (app && appContext) {
+    console.log('[DEBUG][uiManager] Locking app:', app.name);
     appContext.showLockScreen(app);
   }
 };
 
-// Show access setup modal
-export const showAccessSetup = packageName => {
-  console.log('[DEBUG][uiManager.js] inside showAccessSetup packageName - ', packageName);
-  console.log('[DEBUG][uiManager.js] inside showAccessSetup appContext - ', appContext);
-  if (!appContext) return;
-
-  const app = [...appContext.distractingApps, ...appContext.installedApps].find(
-    a => a.packageName === packageName,
-  );
-  console.log('[DEBUG][uiManager.js] inside showAccessSetup app - ', app);
-  if (app) {
-    console.log('[DEBUG][uiManager.js] inside showAccessSetup app inside - ', app);
-    appContext.showAccessSetup(app);
-  }
+// Set context reference
+export const setAppContext = context => {
+  appContext = context;
 };
 
 // Setup event listeners

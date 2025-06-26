@@ -21,27 +21,35 @@ export const AppProvider = ({ children }) => {
 
   // Load initial data from storage
   useEffect(() => {
+    // Modify loadInitialData to load ALL required data
     const loadInitialData = async () => {
       try {
-        const [savedApps, savedRules] = await Promise.all([
+        const [savedApps, savedRules, savedInstalled] = await Promise.all([
           readFromStorage(STORAGE_KEYS.DISTRACTING_APPS) || [],
           readFromStorage(STORAGE_KEYS.ACCESS_RULES) || {},
+          readFromStorage('installedApps') || [], // Add this line
         ]);
 
         setDistractingApps(savedApps);
         setAccessRules(savedRules);
+        setInstalledApps(savedInstalled); // Initialize installed apps
         setIsLoading(false);
 
-        // Initialize native monitor after loading
         initAppMonitor(savedRules);
       } catch (error) {
-        console.error('Failed to load initial data:', error);
+        console.error('Initialization failed:', error);
         setIsLoading(false);
       }
     };
 
     loadInitialData();
   }, []);
+
+  // Add this to persist installed apps
+  const setInstalledAppsPersist = async apps => {
+    setInstalledApps(apps);
+    await saveToStorage('installedApps', apps);
+  };
 
   // Sync rules with native module when changed
   useEffect(() => {
@@ -116,6 +124,7 @@ export const AppProvider = ({ children }) => {
 
   // Show access setup modal
   const showAccessSetup = app => {
+    console.log('[DEBUG][AppContext] showAccessSetup:', app);
     setOverlayApp(app);
     setActiveOverlay('accessSetup');
   };

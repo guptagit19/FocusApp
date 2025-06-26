@@ -15,27 +15,28 @@ import { initAppMonitor, updateAccessRules } from './src/services/appMonitor';
 const AppContent = () => {
   const context = useAppContext();
 
-  // Setup context reference for services
+  // Setup context reference for services and Add this useEffect to keep uiManager's context reference updated
   useEffect(() => {
     setAppContext(context);
     setupEventListeners();
-  }, []);
+  }, [context]); // Update on every context change
 
   // Initialize app monitor
-  useEffect(() => {
-    console.log('Initialize app monitor', context.isLoading);
-    if (!context.isLoading) {
-      initAppMonitor();
-      console.log('[DEBUG][App.js] Initialize', 'setupAppDetectionListener');
-      // Setup app detection listener
-      const subscription = setupAppDetectionListener(packageName => {
-        console.log('[DEBUG][App.js] checkAppBlocking', packageName);
-        checkAppBlocking(packageName);
-      });
+  // Modify existing effect
+useEffect(() => {
+  console.log('Initialize app monitor', context.isLoading);
+  if (!context.isLoading) {
+    initAppMonitor();
+    console.log('[DEBUG][App.js] setupAppDetectionListener initialized');
+    
+    const subscription = setupAppDetectionListener(packageName => {
+      console.log('[DEBUG][App.js] Detected app launch:', packageName);
+      checkAppBlocking(packageName);
+    });
 
-      return () => subscription.remove();
-    }
-  }, [context.isLoading]);
+    return () => subscription.remove();
+  }
+}, [context.isLoading]);
 
   // Update rules when changed
   useEffect(() => {

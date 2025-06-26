@@ -3,12 +3,14 @@ import { AppUtilsModule } from '../utils/nativeModules';
 import { getAccessRules } from './storage';
 
 // Initialize app monitor with current rules
+// Add storage debug to init
 export const initAppMonitor = async () => {
   try {
     const rules = getAccessRules();
+    console.log('[DEBUG][appMonitor] Initializing with rules:', rules);
     await AppUtilsModule.initAppMonitor(JSON.stringify(rules));
   } catch (error) {
-    console.error('Failed to initialize app monitor:', error);
+    console.error('App monitor init failed:', error);
   }
 };
 

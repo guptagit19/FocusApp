@@ -36,3 +36,11 @@ export const getAccessRules = () => readFromStorage('accessRules') || {};
 export const saveDistractingApps = apps =>
   saveToStorage('distractingApps', apps);
 export const saveAccessRules = rules => saveToStorage('accessRules', rules);
+
+// Add this helper function
+export const getAllStorageData = () => {
+  console.log('[STORAGE DUMP]');
+  console.log('Distracting apps:', getDistractingApps());
+  console.log('Access rules:', getAccessRules());
+  console.log('Installed apps:', readFromStorage('installedApps'));
+};

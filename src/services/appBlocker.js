@@ -2,10 +2,13 @@
 import { getDistractingApps, getAccessRules } from './storage';
 import { showLockScreen, showAccessSetup } from './uiManager';
 import { saveAccessRules } from './storage';
+import { Alert } from 'react-native';
 
 // Check if an app should be blocked
-export const checkAppBlocking = packageName => {
-  // Get current state
+export const checkAppBlocking = async packageName => {
+  // Add brief delay to allow context updates
+  //await new Promise(resolve => setTimeout(resolve, 100));
+  
   const distractingApps = getDistractingApps();
   const accessRules = getAccessRules();
 
@@ -16,7 +19,7 @@ export const checkAppBlocking = packageName => {
     console.log('[DEBUG][appBlocker] inside', packageName);
     return;
   }
-
+  Alert.alert('Distracted app', packageName)
   console.log('[DEBUG][appBlocker] packageName - ', packageName);
   const now = Date.now();
   const rule = accessRules[packageName];
@@ -34,6 +37,7 @@ export const checkAppBlocking = packageName => {
   // Case 2: Within access window
   if (now < rule.accessEnd) {
     // Track usage time if needed
+    console.log('[DEBUG][appBlocker] Within access window - ', rule.accessEnd);
     return;
   }
 
