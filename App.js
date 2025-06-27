@@ -10,6 +10,7 @@ import { setupEventListeners, setAppContext } from './src/services/uiManager';
 import { setupAppDetectionListener } from './src/utils/nativeModules';
 import { checkAppBlocking } from './src/services/appBlocker';
 import { initAppMonitor, updateAccessRules } from './src/services/appMonitor';
+import { DeviceEventEmitter } from 'react-native';
 
 // Main app content with overlays
 const AppContent = () => {
@@ -19,24 +20,34 @@ const AppContent = () => {
   useEffect(() => {
     setAppContext(context);
     setupEventListeners();
+    const accessSubscription = DeviceEventEmitter.addListener(
+      'ACCESS_SETUP_COMPLETE',
+      ({ packageName, duration }) => {
+        context.setAppAccess(packageName, duration);
+      },
+    );
+
+    return () => {
+      accessSubscription.remove();
+    };
   }, [context]); // Update on every context change
 
   // Initialize app monitor
   // Modify existing effect
-useEffect(() => {
-  console.log('Initialize app monitor', context.isLoading);
-  if (!context.isLoading) {
-    initAppMonitor();
-    console.log('[DEBUG][App.js] setupAppDetectionListener initialized');
-    
-    const subscription = setupAppDetectionListener(packageName => {
-      console.log('[DEBUG][App.js] Detected app launch:', packageName);
-      checkAppBlocking(packageName);
-    });
+  useEffect(() => {
+    console.log('Initialize app monitor', context.isLoading);
+    if (!context.isLoading) {
+      initAppMonitor();
+      console.log('[DEBUG][App.js] setupAppDetectionListener initialized');
 
-    return () => subscription.remove();
-  }
-}, [context.isLoading]);
+      const subscription = setupAppDetectionListener(packageName => {
+        console.log('[DEBUG][App.js] Detected app launch:', packageName);
+        checkAppBlocking(packageName);
+      });
+
+      return () => subscription.remove();
+    }
+  }, [context.isLoading]);
 
   // Update rules when changed
   useEffect(() => {
@@ -49,7 +60,8 @@ useEffect(() => {
     <>
       <FocusScreen />
 
-      {/* Lock Screen Overlay */}
+      {/*      
+      // Lock Screen Overlay /
       {context.activeOverlay === 'lockScreen' && (
         <LockOverlay
           app={context.overlayApp}
@@ -57,7 +69,7 @@ useEffect(() => {
         />
       )}
 
-      {/* Access Setup Modal */}
+      // Access Setup Modal
       <AccessSetupModal
         visible={context.activeOverlay === 'accessSetup'}
         app={context.overlayApp}
@@ -65,7 +77,9 @@ useEffect(() => {
         onSave={(packageName, duration) => {
           context.setAppAccess(packageName, duration);
         }}
-      />
+        />
+
+       */}
     </>
   );
 };

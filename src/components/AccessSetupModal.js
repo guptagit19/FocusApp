@@ -1,110 +1,151 @@
-// src/components/AccessSetupModal.js
-import React, { useState } from 'react';
+// File: src/components/AccessSetupModal.js
+import React, { useState, useContext, useEffect } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   Modal,
+  StyleSheet,
   TouchableOpacity,
-  TextInput,
+  Platform,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+//import DateTimePicker from '@react-native-community/datetimepicker';
+import { AppContext } from '../context/AppContext';
 
-const AccessSetupModal = ({ visible, app, onClose, onSave }) => {
-  const [minutes, setMinutes] = useState('10');
+export default function AccessSetupModal({ packageName, onClose }) {
+  const { selectedApps, accessRules, setRule } = useContext(AppContext);
+  const [accessDuration, setAccessDuration] = useState(5 * 60 * 1000); // default 5min
+  const [lockDuration, setLockDuration] = useState(30 * 60 * 1000); // default 30min
+
+  const app = selectedApps.find(a => a.packageName === packageName);
+
+  const confirm = () => {
+    const now = Date.now();
+    const accessEnd = now + accessDuration;
+    const lockEnd = accessEnd + lockDuration;
+    console.debug('[DEBUG][AccessSetup] setting rule for', packageName, {
+      accessEnd,
+      lockEnd,
+      lockDuration,
+    });
+    setRule(packageName, { accessEnd, lockEnd, lockDuration });
+    onClose();
+  };
 
   if (!app) return null;
 
-  const handleSave = () => {
-    const duration = parseInt(minutes, 10);
-    if (duration > 0) {
-      onSave(app.packageName, duration);
-      onClose();
-    }
-  };
-
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Set Access for {app.name}</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Icon name="close" size={24} color="#757575" />
+    <Modal transparent animationType="fade">
+      <View style={styles.overlay}>
+        <View style={styles.container}>
+          <Text style={styles.title}>Set Access & Lock Time</Text>
+          <Text style={styles.label}>Access Time (minutes):</Text>
+          {/* Replace with sliders or pickers as desired */}
+          <View style={styles.row}>
+            <TouchableOpacity
+              onPress={() => setAccessDuration(prev => prev + 60 * 1000)}
+            >
+              <Text style={styles.adjust}>＋</Text>
+            </TouchableOpacity>
+            <Text style={styles.value}>
+              {Math.floor(accessDuration / 60000)}
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                setAccessDuration(prev => Math.max(60 * 1000, prev - 60 * 1000))
+              }
+            >
+              <Text style={styles.adjust}>－</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Allow access for (minutes):</Text>
-          <TextInput
-            style={styles.input}
-            value={minutes}
-            onChangeText={setMinutes}
-            keyboardType="numeric"
-            placeholder="Enter minutes"
-          />
+          <Text style={[styles.label, { marginTop: 16 }]}>
+            Lock Duration (minutes):
+          </Text>
+          <View style={styles.row}>
+            <TouchableOpacity
+              onPress={() => setLockDuration(prev => prev + 60 * 1000)}
+            >
+              <Text style={styles.adjust}>＋</Text>
+            </TouchableOpacity>
+            <Text style={styles.value}>{Math.floor(lockDuration / 60000)}</Text>
+            <TouchableOpacity
+              onPress={() =>
+                setLockDuration(prev => Math.max(60 * 1000, prev - 60 * 1000))
+              }
+            >
+              <Text style={styles.adjust}>－</Text>
+            </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>Save</Text>
-          </TouchableOpacity>
+          <View style={styles.buttons}>
+            <TouchableOpacity style={styles.btnCancel} onPress={onClose}>
+              <Text style={styles.btnText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.btnConfirm} onPress={confirm}>
+              <Text style={styles.btnText}>Confirm</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
+  overlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
   },
-  content: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 24,
+  container: {
     width: '80%',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+    backgroundColor: '#222',
+    borderRadius: 12,
+    padding: 20,
   },
   title: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#212121',
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 12,
+    textAlign: 'center',
   },
   label: {
-    fontSize: 16,
-    marginBottom: 8,
-    color: '#424242',
+    color: '#ccc',
+    marginBottom: 4,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#BDBDBD',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 24,
-  },
-  saveButton: {
-    backgroundColor: '#4CAF50',
-    padding: 16,
-    borderRadius: 8,
+  row: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginVertical: 4,
   },
-  saveButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+  adjust: {
+    fontSize: 24,
+    color: '#fff',
+    paddingHorizontal: 12,
+  },
+  value: {
+    fontSize: 20,
+    color: '#fff',
+  },
+  buttons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 20,
+  },
+  btnCancel: {
+    marginRight: 16,
+  },
+  btnConfirm: {
+    backgroundColor: '#3498db',
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  btnText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });
-
-export default AccessSetupModal;

@@ -12,7 +12,6 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.Process;
 import android.util.Log;
-
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
@@ -24,12 +23,13 @@ public class AppMonitorService extends Service {
     private static final String TAG = "AppMonitorService";
     private static final String CHANNEL_ID = "monitor_channel";
     private static final int NOTIFICATION_ID = 1;
-
+    private UsageStatsManager usageStatsManager;
     private volatile boolean isRunning = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
         createNotificationChannel();
     }
 
@@ -59,7 +59,7 @@ public class AppMonitorService extends Service {
 
     private void startMonitoringLoop() {
         new Thread(() -> {
-            UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+           // UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
             while (isRunning) {
                 try {
                     Thread.sleep(1000);
@@ -85,6 +85,14 @@ public class AppMonitorService extends Service {
                         // Intent lockIntent = new Intent(this, LockScreenActivity.class);
                         // lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                         // startActivity(lockIntent);
+
+                        // inside your monitoring loop, after you detect `topPackage` is blocked:
+//                        Intent intent = new Intent(this, SetupActivity.class)
+//                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+//                            .setAction("com.focusapp.SHOW_ACCESS_SETUP");
+//                        intent.putExtra("packageName", topPackage);
+//                        startActivity(intent);
+
                     }
                 } catch (InterruptedException e) {
                     Log.e(TAG, "Monitoring thread interrupted", e);

@@ -3,6 +3,7 @@ package com.focusapp;
 import android.app.Activity;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
@@ -22,8 +23,6 @@ import org.json.JSONObject;
 import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
-
-// Add these new imports
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -33,8 +32,8 @@ import android.util.Base64;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import org.json.JSONArray;
-
-
+import com.focusapp.TransparentActivity; // Make sure the package name is correct
+import android.app.TaskStackBuilder;
 
 public class AppUtilsModule extends ReactContextBaseJavaModule {
     private static final String TAG = "AppUtilsModule";
@@ -83,7 +82,7 @@ public class AppUtilsModule extends ReactContextBaseJavaModule {
         }
 
         usageStatsPermissionPromise = promise;
-        Activity currentActivity = getCurrentActivity();
+        Activity currentActivity = getReactApplicationContext().getCurrentActivity();
         if (currentActivity != null) {
             Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
             currentActivity.startActivityForResult(intent, USAGE_STATS_PERMISSION_REQUEST);
@@ -246,5 +245,89 @@ public class AppUtilsModule extends ReactContextBaseJavaModule {
         reactContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                 .emit(eventName, params);
+    }
+
+    @ReactMethod
+    public void showOverlay(String packageName, String type) {
+        Log.d(TAG, "[DEBUG][AppUtilsModule] showOverlay packageName - " + packageName + " and type - "+ type);
+        try {
+            Context context = reactContext.getApplicationContext();
+            Log.d(TAG, "[DEBUG][AppUtilsModule] showOverlay context - " + context);
+
+            Intent intent = new Intent(context, TransparentActivity.class);
+            intent.putExtra("type", type);
+            intent.putExtra("packageName", packageName);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                    Intent.FLAG_ACTIVITY_CLEAR_TASK |
+                    Intent.FLAG_ACTIVITY_NO_ANIMATION);
+
+            // Use TaskStackBuilder to properly start activity from background
+            try {
+                // Try starting activity normally
+                Log.d(TAG, "[DEBUG][AppUtilsModule] showOverlay Inside try - " + context);
+                TaskStackBuilder stackBuilder = TaskStackBuilder.create(context);
+                stackBuilder.addNextIntentWithParentStack(intent);
+                stackBuilder.startActivities();
+            } catch (SecurityException e) {
+                Log.w(TAG, "Failed to start activity directly, using broadcast fallback");
+                // Use broadcast receiver as fallback
+                Intent broadcastIntent = new Intent("com.focusapp.SHOW_OVERLAY");
+                broadcastIntent.putExtra("packageName", packageName);
+                broadcastIntent.putExtra("type", type);
+                // *** FIX FOR THE ERROR: Make the intent explicit ***
+                broadcastIntent.setComponent(new ComponentName(context.getPackageName(), OverlayBroadcastReceiver.class.getName()));
+                context.sendBroadcast(broadcastIntent);
+            }
+            Log.d(TAG, "[DEBUG][AppUtilsModule] Activity started successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting TransparentActivity", e);
+        }
+    }
+
+    // Replace the showOverlay method with this:
+//    @ReactMethod
+//    public void showOverlay(String packageName, String type) {
+//        Log.d(TAG, "[DEBUG][AppUtilsModule] showOverlay packageName - " + packageName + " and type - "+ type);
+//        try {
+//            // Use application context instead of activity context
+//            Context context = reactContext.getApplicationContext();
+//            Log.d(TAG, "[DEBUG][AppUtilsModule] showOverlay context - " + context);
+//            Intent intent = new Intent(context, TransparentActivity.class);
+//            Log.d(TAG, "[DEBUG][AppUtilsModule] showOverlay intent - " + intent);
+//            intent.putExtra("type", type);
+//            intent.putExtra("packageName", packageName);
+//            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+//                    Intent.FLAG_ACTIVITY_CLEAR_TASK |
+//                    Intent.FLAG_ACTIVITY_NO_ANIMATION);
+//            context.startActivity(intent);
+//        } catch (Exception e) {
+//            Log.e(TAG, "Error starting TransparentActivity", e);
+//        }
+//    }
+
+//    @ReactMethod
+//    public void showOverlay(String packageName, String type) {
+//        Log.d(TAG, "showOverlay: packageName - " + packageName + ", type=" + type);
+//        Intent intent = new Intent(getReactApplicationContext(), TransparentActivity.class);
+//        intent.setAction(Intent.ACTION_MAIN);             // mark as a main entry
+//        intent.addCategory(Intent.CATEGORY_LAUNCHER);     // so Android treats it like a launch
+//        intent.putExtra("type", type);
+//        intent.putExtra("packageName", packageName);
+//        intent.addFlags(
+//                Intent.FLAG_ACTIVITY_NEW_TASK |
+//                        Intent.FLAG_ACTIVITY_CLEAR_TOP |
+//                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+//        );
+//        getReactApplicationContext().startActivity(intent);
+//    }
+
+
+
+    @ReactMethod
+    public void finishOverlay() {
+        Activity currentActivity = getReactApplicationContext().getCurrentActivity();
+        if (currentActivity != null) {
+            currentActivity.finish();
+        }
     }
 }
